@@ -32,14 +32,14 @@ else:
     device = torch.device("cpu")
 
 class Pinet(nn.Module):
-    def __init__(self, n_observations, n_devices):
+    def __init__(self, n_observations, n_actions):
         super(Pinet, self).__init__()
         self.hidden_space = 32
         # Input: state (3) + age (1) for each device + counter
         self.lstm = nn.LSTM(n_observations, self.hidden_space, batch_first=True)
         self.fc1 = nn.Linear(self.hidden_space, self.hidden_space)
         # Output separate probabilities for each device's action
-        self.actor = nn.Linear(self.hidden_space, n_devices)
+        self.actor = nn.Linear(self.hidden_space, n_actions)
         self.critic = nn.Linear(self.hidden_space, 1)
         
         self.init_weights()
@@ -74,11 +74,9 @@ class Pinet(nn.Module):
     def sample_action(self, obs, h, c):
         prob, (h_new, c_new) = self.pi(obs, (h, c))
         m = Categorical(prob)
-        # action = m.sample()
-        # Create Bernoulli distribution for each device
-        distributions = [Bernoulli(p) for p in prob.squeeze()]
-        actions = torch.stack([d.sample() for d in distributions])
-        return prob, actions, h_new, c_new, m.log_prob(actions), m.entropy(), self.v(obs, (h, c))
+        action = m.sample()
+        actions = decimal_to_binary_array(action.cpu())
+        return prob, actions, h_new, c_new, m.log_prob(torch.Tensor(actions).to(device)), m.entropy(), self.v(obs, (h, c))
 
 class Agent:
     def __init__(self, topology, n_obs, n_act, arrival_rate):
@@ -119,29 +117,15 @@ class Agent:
         pi, _ = self.pinet.pi(s, h)
         pi = pi.squeeze(0)  # Remove batch dimension if batch_size=1
         
-        # Calculate policy loss for each device separately
-        policy_losses = []
-        for dev_idx in range(self.n):
-            dev_prob = pi[:, dev_idx]  # Probability of transmission for device dev_idx
-            dev_action = a[:, dev_idx]  # Actual action taken by device dev_idx
-            
-            # Calculate log probability based on whether action was 0 or 1
-            log_prob = torch.where(dev_action == 1, 
-                                torch.log(dev_prob + 1e-10),  # Add small epsilon for numerical stability
-                                torch.log(1 - dev_prob + 1e-10))
-            
-            # Policy loss for this device
-            dev_policy_loss = -log_prob * advantage
-            policy_losses.append(dev_policy_loss)
+        # Make binary actions to decimal
+        a = binary_array_to_decimal(a).unsqueeze(1).to(device)
         
-        # Combine losses
-        policy_loss = torch.stack(policy_losses).mean()  # Average across devices
-        value_loss = F.smooth_l1_loss(v_s, td_target.detach())
-        total_loss = policy_loss + value_loss
+        pi_a = pi.gather(1, a)
+        loss = -torch.log(pi_a) * advantage.unsqueeze(1) + F.smooth_l1_loss(v_s, td_target.detach())
 
         # Optimize
         self.optimizer.zero_grad()
-        total_loss.backward()
+        loss.mean().backward()
         torch.nn.utils.clip_grad_norm_(self.pinet.parameters(), MAX_GRAD_NORM)
         self.optimizer.step()
         self.data = []
@@ -184,12 +168,16 @@ if __name__ == "__main__":
     writer = SummaryWriter(output_path + "/" + "RA2Cfull" + "_" + topo_string + "_" + timestamp)
     
     n_obs = 4*node_n+1
-    n_act = node_n
+    n_act = 2**node_n
     
     # Make agent
     agent = Agent(topology, n_obs=n_obs, n_act=n_act, arrival_rate=arrival_rate)
 
     reward_data = []
+    
+    early_stopping = EarlyStopping(patience=EARLY_STOPPING_PATIENCE)
+    best_model_state = None
+    best_reward = -float('inf')
 
     for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
         episode_utility = 0.0
@@ -205,7 +193,7 @@ if __name__ == "__main__":
             
             # Get binary actions for each device
             # actions = decimal_to_binary_array(a.item(), node_n)
-            actions = np.array(actions.cpu().int())
+            # actions = np.array(actions.cpu().int())
             next_observation, reward, done, _, _ = agent.env.step(actions)
             next_flat_obs = agent.flatten_observation(next_observation)
             
@@ -213,7 +201,7 @@ if __name__ == "__main__":
             reward_data.append({
                 'episode': n_epi,
                 'step': t,
-                'reward': reward,
+                'reward': reward/node_n,
                 'action': actions,
                 'age': agent.env.age.copy()
             })
@@ -223,26 +211,40 @@ if __name__ == "__main__":
                 
             if done:
                 break
-        
+            
         agent.train()
         episode_utility /= node_n
         writer.add_scalar('Avg. Rewards per episodes', episode_utility, n_epi)
 
         if n_epi % print_interval == 0:
             print(f"# of episode :{n_epi}, avg reward : {episode_utility:.1f}")
+            
+        if episode_utility > best_reward:
+            best_reward = episode_utility
+            best_model_state = agent.pinet.state_dict()
+            
+        if early_stopping.should_stop(episode_utility):
+            print(f"Early stopping at episode {n_epi}")
+            agent.pinet.load_state_dict(best_model_state)
+            break
 
     # Save rewards to DataFrame and CSV
+    csv_path = 'csv'
+    if not os.path.exists(csv_path):
+        os.makedirs(csv_path)
+    csv_path = f'{csv_path}/RA2CFull_{topo_string}_{timestamp}.csv'
+    
     reward_df = pd.DataFrame(reward_data)
     action_cols = reward_df['action'].apply(pd.Series)
     action_cols.columns = [f'action_{i}' for i in range(agent.n)]
     age_cols = reward_df['age'].apply(pd.Series)
     age_cols.columns = [f'age_{i}' for i in range(agent.n)]
     result_df = pd.concat([reward_df.drop(['action', 'age'], axis=1), action_cols, age_cols], axis=1)
-    result_df.to_csv(f'RA2Cfull_{topo_string}_{timestamp}.csv', index=False)
+    result_df.to_csv(csv_path, index=False)
     writer.close()
 
     # Save models
     model_path = 'models'
     if not os.path.exists(model_path):
         os.makedirs(model_path)
-    torch.save(agent.pinet.state_dict(), f'{model_path}/RA2Cfull_{topo_string}_{timestamp}.pth')
+    save_model(agent.pinet, f'{model_path}/RA2CFull_{topo_string}_{timestamp}.pt')

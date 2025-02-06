@@ -149,6 +149,10 @@ if __name__ == "__main__":
     agents = [Agent(topology, i, arrival_rate[i]) for i in range(node_n)]
 
     reward_data = []
+    
+    early_stopping = EarlyStopping(patience=EARLY_STOPPING_PATIENCE)
+    best_model_state = None
+    best_reward = -float('inf')
 
     for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
         episode_utility = 0.0
@@ -182,7 +186,7 @@ if __name__ == "__main__":
             reward_data.append({
                 'episode': n_epi,
                 'step': t,
-                'reward': instant_sum,
+                'reward': instant_sum/node_n,
                 'action': np.array(actions),
                 'age': get_env_ages(agents)
                 })
@@ -191,7 +195,7 @@ if __name__ == "__main__":
                 
             if all(done):
                 break
-                
+            
         for agent in agents:
             agent.train()
         episode_utility /= node_n
@@ -199,20 +203,35 @@ if __name__ == "__main__":
 
         if n_epi % print_interval == 0:
             print(f"# of episode :{n_epi}, avg reward : {episode_utility:.1f}")
+            
+        if episode_utility > best_reward:
+            best_reward = episode_utility
+            best_model_state = [agent.pinet.state_dict() for agent in agents]
+            
+        if early_stopping.should_stop(episode_utility):
+            print(f"Early stopping at episode {n_epi}")
+            for i, agent in enumerate(agents):
+                agent.pinet.load_state_dict(best_model_state[i])
+            break
 
     # Save rewards to DataFrame and CSV
+    csv_path = 'csv'
+    if not os.path.exists(csv_path):
+        os.makedirs(csv_path)
+    csv_path = f'{csv_path}/A2C_{topo_string}_{timestamp}.csv'
+    
     reward_df = pd.DataFrame(reward_data)
     action_cols = reward_df['action'].apply(pd.Series)
     action_cols.columns = [f'action_{i}' for i in range(node_n)]
     age_cols = reward_df['age'].apply(pd.Series)
     age_cols.columns = [f'age_{i}' for i in range(node_n)]
     result_df = pd.concat([reward_df.drop(['action', 'age'], axis=1), action_cols, age_cols], axis=1)
-    result_df.to_csv(f'RA2C_{topo_string}_{timestamp}.csv', index=False)
+    result_df.to_csv(csv_path, index=False)
     # reward_df = pd.DataFrame(reward_data)
     # df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', values='prob of 1').reset_index()
     # df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.columns[2:]]
     # df_pivot.to_csv(f'RA2C_{topo_string}_{timestamp}.csv', index=False)
-    # writer.close()
+    writer.close()
 
     # Save models
     model_path = 'models'

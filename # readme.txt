@@ -5,3 +5,5 @@ vscode terminal에서
 
 안되면
 >> python3 -m tensorboard.main --logdir=outputs/ --host localhost --port 8088
+
+timestamp: fixed_timestamp.txt

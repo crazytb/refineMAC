@@ -29,11 +29,27 @@ elif torch.backends.mps.is_available():
 else:
     device = torch.device("cpu")
 
+# class Pinet(nn.Module):
+#     def __init__(self, n_observations, n_actions):
+#         super(Pinet, self).__init__()
+#         self.hidden_space = 32
+#         self.lstm = nn.LSTM(n_observations, self.hidden_space, batch_first=True)
+#         self.fc1 = nn.Linear(self.hidden_space, self.hidden_space)
+#         self.actor = nn.Linear(self.hidden_space, n_actions)
+#         self.critic = nn.Linear(self.hidden_space, 1)
+        
+#         self.init_weights()
+        
 class Pinet(nn.Module):
     def __init__(self, n_observations, n_actions):
         super(Pinet, self).__init__()
         self.hidden_space = 32
-        self.lstm = nn.LSTM(n_observations, self.hidden_space, batch_first=True)
+        self.lstm = nn.LSTM(n_observations,
+                            self.hidden_space//2,
+                            bidirectional=True,
+                            num_layers=2,
+                            dropout=0.1,
+                            batch_first=True)
         self.fc1 = nn.Linear(self.hidden_space, self.hidden_space)
         self.actor = nn.Linear(self.hidden_space, n_actions)
         self.critic = nn.Linear(self.hidden_space, 1)
@@ -107,8 +123,10 @@ class Agent:
 
     def train(self):
         s, a, r, s_prime, done_mask = self.make_batch()
-        h = (torch.zeros([1, 1, self.pinet.hidden_space], dtype=torch.float).to(device),
-             torch.zeros([1, 1, self.pinet.hidden_space], dtype=torch.float).to(device))
+        # h = (torch.zeros([1, 1, self.pinet.hidden_space], dtype=torch.float).to(device),
+        #      torch.zeros([1, 1, self.pinet.hidden_space], dtype=torch.float).to(device))
+        h = (torch.zeros([4, 1, self.pinet.hidden_space//2], dtype=torch.float).to(device),
+             torch.zeros([4, 1, self.pinet.hidden_space//2], dtype=torch.float).to(device))
         
         v_prime = self.pinet.v(s_prime, h).squeeze(1).detach()
         td_target = r + self.gamma * v_prime * done_mask
@@ -172,13 +190,17 @@ if __name__ == "__main__":
         agent.env.set_all_arrival_rates(arrival_rate)
 
     reward_data = []
+    
+    early_stopping = EarlyStopping(patience=EARLY_STOPPING_PATIENCE)
+    best_model_state = None
+    best_reward = -float('inf')
 
     for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
         episode_utility = 0.0
         instant_sum = 0.0
         observation = [agent.env.reset(seed=GLOBAL_SEED)[0] for agent in agents]
-        h = [torch.zeros(1, 1, 32).to(device) for _ in range(node_n)]
-        c = [torch.zeros(1, 1, 32).to(device) for _ in range(node_n)]
+        h = [torch.zeros(4, 1, 16).to(device) for _ in range(node_n)]
+        c = [torch.zeros(4, 1, 16).to(device) for _ in range(node_n)]
         done = [False] * node_n
         
         for t in tqdm(range(MAX_STEPS), desc="  Steps", position=1, leave=False):
@@ -215,7 +237,7 @@ if __name__ == "__main__":
             reward_data.append({
                 'episode': n_epi,
                 'step': t,
-                'reward': instant_sum,
+                'reward': instant_sum/node_n,
                 'action': np.array(actions),
                 'age': get_env_ages(agents)
                 })
@@ -224,7 +246,7 @@ if __name__ == "__main__":
                 
             if all(done):
                 break
-                
+        
         for agent in agents:
             agent.train()
         episode_utility /= node_n
@@ -232,20 +254,36 @@ if __name__ == "__main__":
 
         if n_epi % print_interval == 0:
             print(f"# of episode :{n_epi}, avg reward : {episode_utility:.1f}")
+            
+        if episode_utility > best_reward:
+            best_reward = episode_utility
+            best_model_state = [agent.pinet.state_dict() for agent in agents]
+            
+        if early_stopping.should_stop(episode_utility):
+            print(f"Early stopping at episode {n_epi}")
+            for i, agent in enumerate(agents):
+                agent.pinet.load_state_dict(best_model_state[i])
+            break
 
     # Save rewards to DataFrame and CSV
+    csv_path = 'csv'
+    if not os.path.exists(csv_path):
+        os.makedirs(csv_path)
+    csv_path = f'{csv_path}/RA2C_{topo_string}_{timestamp}.csv'
+    
     reward_df = pd.DataFrame(reward_data)
     action_cols = reward_df['action'].apply(pd.Series)
     action_cols.columns = [f'action_{i}' for i in range(node_n)]
     age_cols = reward_df['age'].apply(pd.Series)
     age_cols.columns = [f'age_{i}' for i in range(node_n)]
     result_df = pd.concat([reward_df.drop(['action', 'age'], axis=1), action_cols, age_cols], axis=1)
-    result_df.to_csv(f'RA2C_{topo_string}_{timestamp}.csv', index=False)
+    result_df.to_csv(csv_path, index=False)
+    # result_df.to_csv(f'RA2C_{topo_string}_{timestamp}.csv', index=False)
     # reward_df = pd.DataFrame(reward_data)
     # df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', values='prob of 1').reset_index()
     # df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.columns[2:]]
     # df_pivot.to_csv(f'RA2C_{topo_string}_{timestamp}.csv', index=False)
-    # writer.close()
+    writer.close()
 
     # Save models
     model_path = 'models'

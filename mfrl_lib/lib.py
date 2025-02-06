@@ -177,12 +177,13 @@ class MFRLEnv(gym.Env):
             reward = 0
         # Save maximum AoI value during the episode
         self.max_aoi = max(self.age, self.max_aoi)
+        reward -= self.age
         # Check termination condition
         terminated = self.counter == MAX_STEPS
         info = {}
         
-        if terminated:
-            reward += (1-self.max_aoi)*MAX_STEPS
+        # if terminated:
+        #     reward += (1-self.max_aoi)*MAX_STEPS
         return observation, reward, terminated, False, info
     
 def get_env_ages(agents):
@@ -253,20 +254,14 @@ class MFRLFullEnv(gym.Env):
             "counter": self.counter
         }
     
-    def _validate_action(self, action):
-        """Validate the input action."""
-        if not isinstance(action, (np.ndarray, list)):
-            raise ValueError(f"Action must be numpy array or list, got {type(action)}")
-        if len(action) != self.n:
-            raise ValueError(f"Action length must be {self.n}, got {len(action)}")
-        if not np.all(np.logical_or(action == 0, action == 1)):
-            raise ValueError("Actions must be binary (0 or 1)")
-        return np.array(action)
-        
+    def get_adjacent_nodes(self, ind):
+        return np.where(self.topology.adjacency_matrix[ind] == 1)[0]
+    
+    def get_mc_state(self, ind):
+        return np.where(self.last_observation['devices'][ind]['state'] == 1)[0].item()
+
     def step(self, action):
         """Execute one step in the environment."""
-        # Validate and store action
-        action = self._validate_action(action)
         self.last_action = action
         
         # Increment counter and age
@@ -284,21 +279,38 @@ class MFRLFullEnv(gym.Env):
         
         # Update states based on transmission outcomes
         new_states = np.zeros((self.n, 3))
+        
+        # for ind in range(self.n):
+        #     if ind in transmitting_devices:
+        #         if len(transmitting_devices) == 1:
+        #             # Successful transmission
+        #             new_states[ind, 1] = 1  # Success state
+        #             self.age[ind] = 0  # Reset age
+        #         else:
+        #             # Collision
+        #             new_states[ind, 2] = 1  # Collision state
+        #     else:
+        #         # Idle
+        #         new_states[ind, 0] = 1
         for ind in range(self.n):
             if ind in transmitting_devices:
-                if len(transmitting_devices) == 1:
-                    # Successful transmission
-                    new_states[ind, 1] = 1  # Success state
-                    self.age[ind] = 0  # Reset age
-                else:
-                    # Collision
-                    new_states[ind, 2] = 1  # Collision state
+                adjacent_nodes = self.get_adjacent_nodes(ind)
+                for j in adjacent_nodes:
+                    js_adjacent_nodes = self.get_adjacent_nodes(j)
+                    js_adjacent_nodes_except_ind = js_adjacent_nodes[js_adjacent_nodes != ind]
+                    if not np.isin(transmitting_devices, js_adjacent_nodes_except_ind).any():
+                        new_states[ind, 1] = 1
+                        self.age[ind] = 0
+                        break
+                    else:
+                        new_states[ind, 2] = 1
+                        break
             else:
-                # Idle
                 new_states[ind, 0] = 1
         
         self.states = new_states
         self.max_aoi = np.maximum(self.age, self.max_aoi)
+        aoi_reward = np.sum(-1 * self.age)
         
         # Create observation
         observation = self._create_observation()
@@ -307,13 +319,14 @@ class MFRLFullEnv(gym.Env):
         # Check termination
         terminated = self.counter >= MAX_STEPS
         
+        total_reward = energy_reward + aoi_reward
         # Calculate reward
-        if terminated:
-            # Add AoI reward at episode end
-            aoi_reward = np.sum((1 - self.max_aoi)) * MAX_STEPS
-            total_reward = energy_reward + aoi_reward
-        else:
-            total_reward = energy_reward
+        # if terminated:
+        #     # Add AoI reward at episode end
+        #     aoi_reward = np.sum((1 - self.max_aoi)) * MAX_STEPS
+        #     total_reward = energy_reward + aoi_reward
+        # else:
+        #     total_reward = energy_reward
             
         return observation, total_reward, terminated, False, {}
     
@@ -329,7 +342,9 @@ class MFRLFullEnv(gym.Env):
         """Perform any necessary cleanup."""
         pass
     
-def decimal_to_binary_array(decimal, n):
+def decimal_to_binary_array(decimal, n=None):
+    if n is None:
+        n = node_n
     # Convert decimal to binary string, remove '0b' prefix
     binary_str = bin(decimal)[2:]
     # Pad with zeros if necessary
@@ -339,15 +354,39 @@ def decimal_to_binary_array(decimal, n):
     # Ensure the array has length n by truncating if necessary
     return binary_array[-n:]
 
+def binary_array_to_decimal(binary, n=None):
+    if n is None:
+        n = node_n
+    weights = 2 ** torch.arange(n-1, -1, -1)  # [128, 64, 32, 16, 8, 4, 2, 1]
+    decimal_values = (binary.cpu() * weights).sum(dim=1)
+    return decimal_values
+
+
 def save_model(model, path='default.pth'):
         torch.save(model.state_dict(), path)
+        
+class EarlyStopping:
+    def __init__(self, patience=50, min_delta=0.0):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.best_reward = -float('inf')
+        self.counter = 0
+        
+    def should_stop(self, reward):
+        if reward > self.best_reward + self.min_delta:
+            self.best_reward = reward
+            self.counter = 0
+        else:
+            self.counter += 1
+        
+        return self.counter >= self.patience
 
 
 # Hyperparameters
-MAX_STEPS = 300
-MAX_EPISODES = 200
-GAMMA = 0.98
-LEARNING_RATE = 0.0001
+MAX_STEPS = 200
+MAX_EPISODES = 1000
+GAMMA = 0.99
+LEARNING_RATE = 1e-4
 N_OBSERVATIONS = 4
 N_ACTIONS = 2
 print_interval = 10
@@ -355,10 +394,11 @@ ENERGY_COEFF = 1
 ENTROPY_COEFF = 0.01
 CRITIC_COEFF = 0.5
 MAX_GRAD_NORM = 0.5
+EARLY_STOPPING_PATIENCE = 50
 
-    
 # Make topology
-node_n = 8
+node_n = 20
+# "Model must be dumbbell, linear, random or fullmesh."
 method = "fullmesh"
 if method == "fullmesh":
     density = 1
@@ -382,4 +422,3 @@ FIXED_TIMESTAMP = get_fixed_timestamp()
 
 # DataFrame to store rewards
 reward_data = []
-
