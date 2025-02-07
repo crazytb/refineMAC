@@ -28,7 +28,7 @@ topology.show_adjacency_matrix()
 
 def test_model(simmode=None, max_episodes=20, max_steps=300):
     # Create the agents
-    if simmode == "RA2C":
+    if simmode == "RA2C" or simmode == "RA2CFedAvg":
         agents = [RA2C.Agent(topology, i, arrival_rate[i]) for i in range(node_n)]
     elif simmode == "RA2CFull":
         agent = RA2CFull.Agent(topology, n_obs=4*node_n+1, n_act=node_n, arrival_rate=arrival_rate)
@@ -41,6 +41,16 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
     if simmode == "RA2C":
         for i in range(topology.n):
             agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_{topo_string}_agent_{i}_{timestamp}.pth", map_location=device))
+    if simmode == "RA2CFedAvg":
+        # For federated averaging across all agents
+        for i in range(topology.n):
+            agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_{topo_string}_agent_{i}_{timestamp}.pth", map_location=device))
+        params = [a.pinet.state_dict() for a in agents]
+        avg_params = {}
+        for key in params[0].keys():
+            avg_params[key] = sum(p[key] for p in params) / len(params)
+        for agent in agents:
+            agent.pinet.load_state_dict(avg_params)
     elif simmode == "RA2CFull":
         agent.pinet.load_state_dict(torch.load(f"models/RA2CFull_{topo_string}_{timestamp}.pth", map_location=device))
     elif simmode == "A2C":
@@ -50,7 +60,7 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
     total_reward = 0
     df = pd.DataFrame()
     for n_epi in tqdm(range(max_episodes)):
-        if simmode == "RA2C":
+        if simmode == "RA2C" or simmode == "RA2CFedAvg":
             states = [torch.from_numpy(agent.env.reset()[0].astype('float32')).unsqueeze(0).to(device) for agent in agents]
             probs = [None]*node_n
             h = [torch.zeros(4, 1, 16).to(device) for _ in range(node_n)]
@@ -72,10 +82,10 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
             actions = []
             next_states = []
             aoi_all = []
-            if simmode == "RA2C" or simmode == "A2C":
+            if simmode == "RA2C" or simmode == "A2C" or simmode == "RA2CFedAvg":
                 for i in range(node_n):
                     with torch.no_grad():
-                        if simmode == "RA2C":
+                        if simmode == "RA2C" or simmode == "RA2CFedAvg":
                             probs[i], a, h[i], c[i], _, _, _ = agents[i].pinet.sample_action(states[i], h[i], c[i])
                         elif simmode == "A2C":
                             probs[i], a, _, _, _ = agents[i].pinet.sample_action(states[i])
@@ -121,7 +131,7 @@ timestamp = FIXED_TIMESTAMP
 log_folder = "test_logs"
 os.makedirs(log_folder, exist_ok=True)
 
-for mode in ["RA2CFull", "RA2C", "A2C"]:
+for mode in ["RA2CFedAvg"]:
     print(f"Testing model for {mode}...")
     MAX_EPISODES = 10
     MAX_STEPS = 200

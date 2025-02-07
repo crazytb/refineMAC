@@ -370,7 +370,7 @@ MAX_GRAD_NORM = 0.5
 EARLY_STOPPING_PATIENCE = 50
 
 # Make topology
-node_n = 20
+node_n = 10
 # "Model must be dumbbell, linear, random or fullmesh."
 method = "fullmesh"
 if method == "fullmesh":
