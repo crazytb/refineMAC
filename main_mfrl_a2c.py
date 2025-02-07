@@ -77,7 +77,7 @@ class Agent:
         self.pinet = Pinet(N_OBSERVATIONS, N_ACTIONS).to(device)
         self.optimizer = optim.Adam(self.pinet.parameters(), lr=LEARNING_RATE)
         self.data = []
-        
+
     def get_adjacent_ids(self):
         return np.where(self.topology.adjacency_matrix[self.id] == 1)[0]
     
@@ -186,7 +186,7 @@ if __name__ == "__main__":
             reward_data.append({
                 'episode': n_epi,
                 'step': t,
-                'reward': instant_sum/node_n,
+                'reward': instant_sum,
                 'action': np.array(actions),
                 'age': get_env_ages(agents)
                 })

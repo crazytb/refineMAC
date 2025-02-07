@@ -202,7 +202,7 @@ if __name__ == "__main__":
             reward_data.append({
                 'episode': n_epi,
                 'step': t,
-                'reward': reward/node_n,
+                'reward': reward,
                 'action': actions,
                 'age': agent.env.age.copy()
             })

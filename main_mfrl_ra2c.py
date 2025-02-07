@@ -91,21 +91,12 @@ class Agent:
         self.pinet = Pinet(N_OBSERVATIONS, N_ACTIONS).to(device)
         self.optimizer = optim.Adam(self.pinet.parameters(), lr=LEARNING_RATE)
         self.data = []
-        self.estimated_adj_nodes = []
-        
-    def append_adj_id(self, lst, item):
-        if item not in lst:
-            lst.append(item)
-        return lst
-    
+
     def get_adjacent_ids(self):
         return np.where(self.topology.adjacency_matrix[self.id] == 1)[0]
     
     def get_adjacent_num(self):
-        if len(self.estimated_adj_nodes) == 0:
-            return 1
-        else:
-            return len(self.estimated_adj_nodes)
+        return len(self.get_adjacent_ids())
     
     def put_data(self, item):
         self.data.append(item)
@@ -170,9 +161,6 @@ if __name__ == "__main__":
         os.makedirs(output_path)
     writer = SummaryWriter(output_path + "/" + "RA2C" + "_" + topo_string + "_" + timestamp)
 
-    # Parameter overwriting
-    # MAX_EPISODES = 10
-
     # Make agents
     agents = [Agent(topology, i, arrival_rate[i]) for i in range(node_n)]
     for agent in agents:
@@ -207,13 +195,7 @@ if __name__ == "__main__":
             for agent_id, agent in enumerate(agents):
                 agent.env.set_all_actions(real_actions)
                 max_aoi.append(agent.env.get_maxaoi())
-                if actions[agent_id] == 0:
-                    transmitting_node = agent.topology.adjacency_matrix[agent_id] * actions
-                    if sum(transmitting_node) == 1:
-                        # Find the corresponding node id
-                        transmitting_node_id = np.where(transmitting_node == 1)[0][0]
-                        agent.append_adj_id(agent.estimated_adj_nodes, transmitting_node_id)
-
+            
             for agent_id, agent in enumerate(agents):
                 agent.env.set_max_aoi(max_aoi)
                 # next_observation, reward, done[agent_id], _, _ = agent.env.step(actions[agent_id])
@@ -226,7 +208,7 @@ if __name__ == "__main__":
             reward_data.append({
                 'episode': n_epi,
                 'step': t,
-                'reward': instant_sum/node_n,
+                'reward': instant_sum,
                 'action': np.array(actions),
                 'age': get_env_ages(agents)
                 })
@@ -235,7 +217,7 @@ if __name__ == "__main__":
                 
             if all(done):
                 break
-        
+            
         for agent in agents:
             agent.train()
         episode_utility /= node_n

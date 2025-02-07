@@ -113,6 +113,8 @@ class MFRLEnv(gym.Env):
         self.observation_space = spaces.Box(low=0, high=1, shape=(1, 4))
         self.action_space = spaces.Discrete(2)
         
+        max_energy_penalty = -1 * ENERGY_COEFF * self.all_num
+        
     def reset(self, seed=None):
         super().reset(seed=seed)
         self.counter = 0
@@ -177,13 +179,13 @@ class MFRLEnv(gym.Env):
             reward = 0
         # Save maximum AoI value during the episode
         self.max_aoi = max(self.age, self.max_aoi)
-        reward -= self.age
+        # reward -= self.age
         # Check termination condition
         terminated = self.counter == MAX_STEPS
         info = {}
         
-        # if terminated:
-        #     reward += (1-self.max_aoi)*MAX_STEPS
+        if terminated:
+            reward += (1-self.max_aoi)*MAX_STEPS
         return observation, reward, terminated, False, info
     
 def get_env_ages(agents):
@@ -287,14 +289,17 @@ class MFRLFullEnv(gym.Env):
         
         self.states = new_states
         self.max_aoi = np.maximum(self.age, self.max_aoi)
-        aoi_reward = np.sum(-1 * self.age)
-        total_reward = energy_reward + aoi_reward
+        # aoi_reward = np.sum(-1 * self.age)
         
         # Create observation
         observation = self._create_observation()
         
         # Check termination
         terminated = self.counter >= MAX_STEPS
+        if terminated:
+            total_reward = energy_reward + np.sum((1 - self.max_aoi) * MAX_STEPS)
+        else:
+            total_reward = energy_reward
             
         return observation, total_reward, terminated, False, {}
     
@@ -365,7 +370,7 @@ MAX_GRAD_NORM = 0.5
 EARLY_STOPPING_PATIENCE = 50
 
 # Make topology
-node_n = 3
+node_n = 10
 # "Model must be dumbbell, linear, random or fullmesh."
 method = "fullmesh"
 if method == "fullmesh":
