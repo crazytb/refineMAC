@@ -121,8 +121,7 @@ timestamp = FIXED_TIMESTAMP
 log_folder = "test_logs"
 os.makedirs(log_folder, exist_ok=True)
 
-for mode in ["RA2CFull", "A2C"]:
-# for mode in ["A2C"]:
+for mode in ["RA2CFull", "RA2C", "A2C"]:
     print(f"Testing model for {mode}...")
     MAX_EPISODES = 10
     MAX_STEPS = 200
