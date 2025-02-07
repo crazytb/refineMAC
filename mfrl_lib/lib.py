@@ -222,10 +222,6 @@ class MFRLFullEnv(gym.Env):
         # Define action space as MultiBinary for direct binary actions
         self.action_space = spaces.MultiBinary(self.n)
         
-        # For storing last action and observation (useful for debugging)
-        self.last_action = None
-        self.last_observation = None
-        
     def reset(self, seed=None, options=None):
         """Reset the environment to initial state."""
         super().reset(seed=seed)
@@ -262,71 +258,43 @@ class MFRLFullEnv(gym.Env):
 
     def step(self, action):
         """Execute one step in the environment."""
-        self.last_action = action
-        
         # Increment counter and age
         self.counter += 1
         self.age += 1 / MAX_STEPS
         
         # Track transmitting devices and calculate energy cost
-        transmitting_devices = []
-        for ind, act in enumerate(action):
-            if act == 1 and self.arrival_rate[ind] > np.random.rand():
-                transmitting_devices.append(ind)
+        action = action.squeeze()
+        transmitting_devices = [i for i, (act, rate) in enumerate(zip(action, self.arrival_rate)) if act == 1 and rate > np.random.rand()]
         
         # Calculate energy cost
         energy_reward = -1 * len(transmitting_devices) * ENERGY_COEFF
         
         # Update states based on transmission outcomes
         new_states = np.zeros((self.n, 3))
-        
-        # for ind in range(self.n):
-        #     if ind in transmitting_devices:
-        #         if len(transmitting_devices) == 1:
-        #             # Successful transmission
-        #             new_states[ind, 1] = 1  # Success state
-        #             self.age[ind] = 0  # Reset age
-        #         else:
-        #             # Collision
-        #             new_states[ind, 2] = 1  # Collision state
-        #     else:
-        #         # Idle
-        #         new_states[ind, 0] = 1
         for ind in range(self.n):
             if ind in transmitting_devices:
                 adjacent_nodes = self.get_adjacent_nodes(ind)
-                for j in adjacent_nodes:
-                    js_adjacent_nodes = self.get_adjacent_nodes(j)
-                    js_adjacent_nodes_except_ind = js_adjacent_nodes[js_adjacent_nodes != ind]
-                    if not np.isin(transmitting_devices, js_adjacent_nodes_except_ind).any():
-                        new_states[ind, 1] = 1
-                        self.age[ind] = 0
-                        break
-                    else:
-                        new_states[ind, 2] = 1
-                        break
-            else:
+                adj_transmitting = [n for n in adjacent_nodes 
+                                  if n in transmitting_devices]
+                
+                if not adj_transmitting:  # Successful transmission
+                    new_states[ind, 1] = 1
+                    self.age[ind] = 0
+                else:  # Collision
+                    new_states[ind, 2] = 1
+            else:  # Idle
                 new_states[ind, 0] = 1
         
         self.states = new_states
         self.max_aoi = np.maximum(self.age, self.max_aoi)
         aoi_reward = np.sum(-1 * self.age)
+        total_reward = energy_reward + aoi_reward
         
         # Create observation
         observation = self._create_observation()
-        self.last_observation = observation
         
         # Check termination
         terminated = self.counter >= MAX_STEPS
-        
-        total_reward = energy_reward + aoi_reward
-        # Calculate reward
-        # if terminated:
-        #     # Add AoI reward at episode end
-        #     aoi_reward = np.sum((1 - self.max_aoi)) * MAX_STEPS
-        #     total_reward = energy_reward + aoi_reward
-        # else:
-        #     total_reward = energy_reward
             
         return observation, total_reward, terminated, False, {}
     
@@ -397,11 +365,13 @@ MAX_GRAD_NORM = 0.5
 EARLY_STOPPING_PATIENCE = 50
 
 # Make topology
-node_n = 20
+node_n = 16
 # "Model must be dumbbell, linear, random or fullmesh."
 method = "fullmesh"
 if method == "fullmesh":
     density = 1
+else:
+    density = 0.5
 topology = Topology(n=node_n, model=method, density=density)
 topo_string = f"{method}_{node_n}"
 arrival_rate = np.linspace(0, 1, node_n+2).tolist()[1:-1]

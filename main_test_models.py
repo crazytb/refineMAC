@@ -31,7 +31,7 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
     if simmode == "RA2C":
         agents = [RA2C.Agent(topology, i, arrival_rate[i]) for i in range(node_n)]
     elif simmode == "RA2CFull":
-        agent = RA2CFull.Agent(topology, n_obs=4*node_n+1, n_act=2**node_n, arrival_rate=arrival_rate)
+        agent = RA2CFull.Agent(topology, n_obs=4*node_n+1, n_act=node_n, arrival_rate=arrival_rate)
     elif simmode == "A2C":
         agents = [A2C.Agent(topology, i, arrival_rate[i]) for i in range(node_n)]
     else:
@@ -53,8 +53,8 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
         if simmode == "RA2C":
             states = [torch.from_numpy(agent.env.reset()[0].astype('float32')).unsqueeze(0).to(device) for agent in agents]
             probs = [None]*node_n
-            h = [torch.zeros(1, 1, 32).to(device) for _ in range(node_n)]
-            c = [torch.zeros(1, 1, 32).to(device) for _ in range(node_n)]
+            h = [torch.zeros(4, 1, 16).to(device) for _ in range(node_n)]
+            c = [torch.zeros(4, 1, 16).to(device) for _ in range(node_n)]
         elif simmode == "RA2CFull":
             obs = agent.env.reset()[0]
             states = agent.flatten_observation(obs)
@@ -107,7 +107,7 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
                 states = next_state
                 df_index = pd.DataFrame(data=[[n_epi, t]], columns=['episode', 'epoch'])
                 df_aoi = pd.DataFrame(data=aoi_all, columns=[f'aoi_{node}' for node in range(node_n)])
-                df_action = pd.DataFrame(data=[actions], columns=[f'action_{node}' for node in range(node_n)])
+                df_action = pd.DataFrame(data=[actions.cpu().numpy().flatten()], columns=[f'action_{node}' for node in range(node_n)])
                 df_reward = pd.DataFrame(data=[[reward_per_epi/node_n]], columns=['reward'])
                 df1 = pd.concat([df_index, df_aoi, df_action, df_reward], axis=1)
                 df = pd.concat([df, df1])
@@ -121,8 +121,8 @@ timestamp = FIXED_TIMESTAMP
 log_folder = "test_logs"
 os.makedirs(log_folder, exist_ok=True)
 
-# for mode in ["RA2C", "RA2CFull", "A2C"]:
-for mode in ["RA2C"]:
+for mode in ["RA2CFull", "A2C"]:
+# for mode in ["A2C"]:
     print(f"Testing model for {mode}...")
     MAX_EPISODES = 10
     MAX_STEPS = 200

@@ -32,14 +32,14 @@ else:
     device = torch.device("cpu")
 
 class Pinet(nn.Module):
-    def __init__(self, n_observations, n_actions):
+    def __init__(self, n_observations, n_nodes):
         super(Pinet, self).__init__()
         self.hidden_space = 32
         # Input: state (3) + age (1) for each device + counter
         self.lstm = nn.LSTM(n_observations, self.hidden_space, batch_first=True)
         self.fc1 = nn.Linear(self.hidden_space, self.hidden_space)
         # Output separate probabilities for each device's action
-        self.actor = nn.Linear(self.hidden_space, n_actions)
+        self.actor = nn.Linear(self.hidden_space, n_nodes)
         self.critic = nn.Linear(self.hidden_space, 1)
         
         self.init_weights()
@@ -63,6 +63,7 @@ class Pinet(nn.Module):
         x = F.relu(self.fc1(x))
         x = self.actor(x)
         prob = F.softmax(x, dim=2)
+        prob = F.sigmoid(x)
         return prob, lstm_hidden
     
     def v(self, x, hidden):
@@ -73,11 +74,14 @@ class Pinet(nn.Module):
 
     def sample_action(self, obs, h, c):
         prob, (h_new, c_new) = self.pi(obs, (h, c))
-        m = Categorical(prob)
-        action = m.sample()
-        actions = decimal_to_binary_array(action.cpu())
-        return prob, actions, h_new, c_new, m.log_prob(torch.Tensor(actions).to(device)), m.entropy(), self.v(obs, (h, c))
-
+        # Sample binary action for each node
+        dist = Bernoulli(prob)
+        actions = dist.sample()
+        log_prob = dist.log_prob(actions).sum(-1)  # Sum log probs across nodes
+        entropy = dist.entropy().mean()
+        value = self.v(obs, (h, c))
+        return prob, actions, h_new, c_new, log_prob, entropy, value
+    
 class Agent:
     def __init__(self, topology, n_obs, n_act, arrival_rate):
         self.gamma = GAMMA
@@ -117,11 +121,17 @@ class Agent:
         pi, _ = self.pinet.pi(s, h)
         pi = pi.squeeze(0)  # Remove batch dimension if batch_size=1
         
-        # Make binary actions to decimal
-        a = binary_array_to_decimal(a).unsqueeze(1).to(device)
+        # # Make binary actions to decimal
+        # a = binary_array_to_decimal(a).unsqueeze(1).to(device)
         
-        pi_a = pi.gather(1, a)
-        loss = -torch.log(pi_a) * advantage.unsqueeze(1) + F.smooth_l1_loss(v_s, td_target.detach())
+        # pi_a = pi.gather(1, a)
+        # loss = -torch.log(pi_a) * advantage.unsqueeze(1) + F.smooth_l1_loss(v_s, td_target.detach())
+        
+        action_loss = F.binary_cross_entropy_with_logits(
+            pi, a.float(), reduction='none').mean(-1)  # Average across nodes
+        
+        loss = action_loss * advantage + F.smooth_l1_loss(v_s, td_target.detach())
+        
 
         # Optimize
         self.optimizer.zero_grad()
@@ -134,28 +144,18 @@ class Agent:
         s_lst, a_lst, r_lst, s_prime_lst, done_lst = [], [], [], [], []
         for transition in self.data:
             s, a, r, s_prime, done = transition
-            
             s_lst.append(s)
             a_lst.append(a)
             r_lst.append([r])
             s_prime_lst.append(s_prime)
             done_mask = 0 if done else 1
             done_lst.append([done_mask])
-        
-        s_lst = np.array(s_lst)
-        a_lst = np.array(a_lst)
-        r_lst = np.array(r_lst)
-        s_prime_lst = np.array(s_prime_lst)
-        done_lst = np.array(done_lst)
             
-        s = torch.tensor(s_lst, dtype=torch.float).to(device)
-        a = torch.tensor(a_lst).to(device)
+        s = torch.tensor(s_lst, dtype=torch.float).to(device).view([1, len(self.data), -1])
+        a = torch.stack(a_lst).to(device).squeeze()  # Stack and remove middle dimension
         r = torch.tensor(r_lst).to(device)
-        s_prime = torch.tensor(s_prime_lst, dtype=torch.float).to(device)
+        s_prime = torch.tensor(s_prime_lst, dtype=torch.float).to(device).view([1, len(self.data), -1])
         done_mask = torch.tensor(done_lst, dtype=torch.float).to(device)
-        
-        s = s.view([1, len(self.data), -1])
-        s_prime = s_prime.view([1, len(self.data), -1])
         return s, a, r, s_prime, done_mask
 
 
@@ -168,7 +168,8 @@ if __name__ == "__main__":
     writer = SummaryWriter(output_path + "/" + "RA2Cfull" + "_" + topo_string + "_" + timestamp)
     
     n_obs = 4*node_n+1
-    n_act = 2**node_n
+    # n_act = 2**node_n
+    n_act = node_n
     
     # Make agent
     agent = Agent(topology, n_obs=n_obs, n_act=n_act, arrival_rate=arrival_rate)
@@ -235,10 +236,12 @@ if __name__ == "__main__":
     csv_path = f'{csv_path}/RA2CFull_{topo_string}_{timestamp}.csv'
     
     reward_df = pd.DataFrame(reward_data)
-    action_cols = reward_df['action'].apply(pd.Series)
-    action_cols.columns = [f'action_{i}' for i in range(agent.n)]
-    age_cols = reward_df['age'].apply(pd.Series)
-    age_cols.columns = [f'age_{i}' for i in range(agent.n)]
+    # Convert actions to numpy arrays and reshape
+    reward_df['action'] = reward_df['action'].apply(lambda x: x.cpu().numpy().flatten())
+    # Process columns
+    action_cols = pd.DataFrame(reward_df['action'].tolist(), columns=[f'action_{i}' for i in range(agent.n)])
+    age_cols = pd.DataFrame(reward_df['age'].tolist(), columns=[f'age_{i}' for i in range(agent.n)])
+    # Combine into final dataframe
     result_df = pd.concat([reward_df.drop(['action', 'age'], axis=1), action_cols, age_cols], axis=1)
     result_df.to_csv(csv_path, index=False)
     writer.close()
@@ -247,4 +250,4 @@ if __name__ == "__main__":
     model_path = 'models'
     if not os.path.exists(model_path):
         os.makedirs(model_path)
-    save_model(agent.pinet, f'{model_path}/RA2CFull_{topo_string}_{timestamp}.pt')
+    save_model(agent.pinet, f'{model_path}/RA2CFull_{topo_string}_{timestamp}.pth')
