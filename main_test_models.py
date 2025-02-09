@@ -42,15 +42,8 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
         for i in range(topology.n):
             agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_{topo_string}_agent_{i}_{timestamp}.pth", map_location=device))
     if simmode == "RA2CFedAvg":
-        # For federated averaging across all agents
         for i in range(topology.n):
-            agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_{topo_string}_agent_{i}_{timestamp}.pth", map_location=device))
-        params = [a.pinet.state_dict() for a in agents]
-        avg_params = {}
-        for key in params[0].keys():
-            avg_params[key] = sum(p[key] for p in params) / len(params)
-        for agent in agents:
-            agent.pinet.load_state_dict(avg_params)
+            agents[i].pinet.load_state_dict(torch.load(f"models/RA2Cfedavg_{topo_string}_agent_{i}_{timestamp}.pth", map_location=device))
     elif simmode == "RA2CFull":
         agent.pinet.load_state_dict(torch.load(f"models/RA2CFull_{topo_string}_{timestamp}.pth", map_location=device))
     elif simmode == "A2C":
