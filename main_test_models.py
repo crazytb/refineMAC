@@ -123,8 +123,9 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
 timestamp = FIXED_TIMESTAMP
 log_folder = "test_logs"
 os.makedirs(log_folder, exist_ok=True)
-
-for mode in ["RA2CFedAvg"]:
+mode = "RA2C"
+for enecoeff in [0.5, 1, 2]:
+    topo_string = f"{method}_n{node_n}_c{enecoeff}"
     print(f"Testing model for {mode}...")
     MAX_EPISODES = 10
     MAX_STEPS = 200

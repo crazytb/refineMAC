@@ -358,12 +358,13 @@ class EarlyStopping:
 # Hyperparameters
 MAX_STEPS = 200
 MAX_EPISODES = 1000
+FEDAVG_INTERVAL = 20
 GAMMA = 0.99
 LEARNING_RATE = 1e-4
 N_OBSERVATIONS = 4
 N_ACTIONS = 2
 print_interval = 10
-ENERGY_COEFF = 1
+ENERGY_COEFF = 2
 ENTROPY_COEFF = 0.01
 CRITIC_COEFF = 0.5
 MAX_GRAD_NORM = 0.5
@@ -378,7 +379,7 @@ if method == "fullmesh":
 else:
     density = 0.5
 topology = Topology(n=node_n, model=method, density=density)
-topo_string = f"{method}_{node_n}"
+topo_string = f"{method}_n{node_n}_c{ENERGY_COEFF}"
 arrival_rate = np.linspace(0, 1, node_n+2).tolist()[1:-1]
 
 # Make timestamp
