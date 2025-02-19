@@ -24,16 +24,25 @@ elif torch.backends.mps.is_available():
 else:
     device = torch.device("cpu")
 
-topology.show_adjacency_matrix()
+def select_highest_age(states):
+    devices = states['devices']
+    ages = np.array([device['age'][0] for device in devices])
+    
+    max_age = np.max(ages)
+    max_indices = np.where(ages == max_age)[0]
+    
+    return random.choice(max_indices)
 
 def test_model(simmode=None, max_episodes=20, max_steps=300):
     # Create the agents
     if simmode == "RA2C" or simmode == "RA2CFedAvg":
         agents = [RA2C.Agent(topology, i, arrival_rate[i]) for i in range(node_n)]
-    elif simmode == "RA2CFull":
+    elif simmode == "RA2CFull" or simmode == "GlobalOpt":
         agent = RA2CFull.Agent(topology, n_obs=4*node_n+1, n_act=node_n, arrival_rate=arrival_rate)
     elif simmode == "A2C":
         agents = [A2C.Agent(topology, i, arrival_rate[i]) for i in range(node_n)]
+    elif simmode == "GlobalOpt":
+        pass
     else:
         raise ValueError("Invalid simmode.")
     
@@ -65,6 +74,8 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
             probs = None
             h = torch.zeros(1, 1, 32).to(device)
             c = torch.zeros(1, 1, 32).to(device)
+        elif simmode == "GlobalOpt":
+            states = agent.env.reset()[0]
         elif simmode == "A2C":
             states = [torch.from_numpy(agent.env.reset()[0].astype('float32')).unsqueeze(0).to(device) for agent in agents]
             probs = [None]*node_n
@@ -114,6 +125,20 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
                 df_reward = pd.DataFrame(data=[[reward_per_epi/node_n]], columns=['reward'])
                 df1 = pd.concat([df_index, df_aoi, df_action, df_reward], axis=1)
                 df = pd.concat([df, df1])
+            elif simmode == "GlobalOpt":
+                actions = select_highest_age(states)
+                next_state, reward_inst, _, _, _ = agent.env.step(actions)
+                next_state = agent.flatten_observation(next_state)
+                next_state = torch.tensor(next_state, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(device)
+                aoi_all.append(agent.env.age)
+                reward_per_epi += reward_inst
+                states = next_state
+                df_index = pd.DataFrame(data=[[n_epi, t]], columns=['episode', 'epoch'])
+                df_aoi = pd.DataFrame(data=aoi_all, columns=[f'aoi_{node}' for node in range(node_n)])
+                df_action = pd.DataFrame(data=[actions.cpu().numpy().flatten()], columns=[f'action_{node}' for node in range(node_n)])
+                df_reward = pd.DataFrame(data=[[reward_per_epi/node_n]], columns=['reward'])
+                df1 = pd.concat([df_index, df_aoi, df_action, df_reward], axis=1)
+                df = pd.concat([df, df1])
         total_reward += reward_per_epi
 
     average_reward = total_reward/(max_episodes*node_n)
@@ -123,8 +148,11 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
 timestamp = FIXED_TIMESTAMP
 log_folder = "test_logs"
 os.makedirs(log_folder, exist_ok=True)
-mode = "RA2C"
-for enecoeff in [0.5, 1, 2]:
+# mode = "RA2C"
+enecoeff = ENERGY_COEFF
+# for enecoeff in [0.5, 1, 2]:
+# for mode in ["RA2C", "RA2CFedAvg", "RA2CFull", "A2C"]:
+for mode in ["RA2CFull", "GlobalOpt"]:
     topo_string = f"{method}_n{node_n}_c{enecoeff}"
     print(f"Testing model for {mode}...")
     MAX_EPISODES = 10
