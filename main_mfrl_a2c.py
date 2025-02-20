@@ -128,7 +128,7 @@ class Agent:
         
         s = torch.tensor(s_lst, dtype=torch.float).to(device)
         a = torch.tensor(a_lst).to(device)
-        r = torch.tensor(r_lst).to(device)
+        r = torch.tensor(r_lst, dtype=torch.float32).to(device)
         s_prime = torch.tensor(s_prime_lst, dtype=torch.float).to(device)
         done_mask = torch.tensor(done_lst, dtype=torch.float).to(device)
         

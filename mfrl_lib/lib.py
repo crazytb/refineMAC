@@ -354,7 +354,6 @@ class EarlyStopping:
         
         return self.counter >= self.patience
 
-
 # Hyperparameters
 MAX_STEPS = 200
 MAX_EPISODES = 1000
@@ -364,7 +363,7 @@ LEARNING_RATE = 1e-4
 N_OBSERVATIONS = 4
 N_ACTIONS = 2
 print_interval = 10
-ENERGY_COEFF = 0.5
+ENERGY_COEFF = 0.9
 ENTROPY_COEFF = 0.01
 CRITIC_COEFF = 0.5
 MAX_GRAD_NORM = 0.5

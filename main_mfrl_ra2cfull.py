@@ -153,7 +153,7 @@ class Agent:
             
         s = torch.tensor(s_lst, dtype=torch.float).to(device).view([1, len(self.data), -1])
         a = torch.stack(a_lst).to(device).squeeze()  # Stack and remove middle dimension
-        r = torch.tensor(r_lst).to(device)
+        r = torch.tensor(r_lst, dtype=torch.float32).to(device)
         s_prime = torch.tensor(s_prime_lst, dtype=torch.float).to(device).view([1, len(self.data), -1])
         done_mask = torch.tensor(done_lst, dtype=torch.float).to(device)
         return s, a, r, s_prime, done_mask
