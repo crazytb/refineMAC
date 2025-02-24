@@ -125,7 +125,7 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
                 df = pd.concat([df, df1])
             elif simmode == "RA2CFullOpt":
                 # Get the ages from the current state
-                devices = agent.env.last_observation['devices']  # Changed from agent.env.state to agent.env.last_observation
+                devices = obs['devices']  # Changed from agent.env.state to agent.env.last_observation
                 ages = np.array([device['age'][0] for device in devices])
                 
                 # Find device with maximum age
@@ -137,16 +137,16 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
                 actions = np.zeros(node_n)
                 actions[selected_idx] = 1
                 
-                # Apply arrival rate mask
-                actions = actions * (arrival_rate > np.random.rand(node_n))
+                # # Apply arrival rate mask
+                # actions = actions * (arrival_rate > np.random.rand(node_n))
                 
                 # Take step
                 next_state, reward_inst, _, _, _ = agent.env.step(actions)
-                next_state = agent.flatten_observation(next_state)
-                next_state = torch.tensor(next_state, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(device)
+                # next_state = agent.flatten_observation(next_state)
+                # next_state = torch.tensor(next_state, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(device)
                 aoi_all.append(agent.env.age)
                 reward_per_epi += reward_inst
-                states = next_state
+                obs = next_state
                 
                 # Record data
                 df_index = pd.DataFrame(data=[[n_epi, t]], columns=['episode', 'epoch'])
@@ -166,10 +166,9 @@ log_folder = "test_logs"
 os.makedirs(log_folder, exist_ok=True)
 # mode = "RA2C"
 enecoeff = ENERGY_COEFF
-# for enecoeff in [0.5, 1, 2]:
-# for mode in ["RA2C", "RA2CFedAvg", "RA2CFull", "A2C"]:
-for mode in ["RA2C", "RA2CFullOpt"]:
-    for enecoeff in [0.5, 1, 2]:
+for enecoeff in [0.1, 0.5, 0.9]:
+    # for mode in ["RA2C", "RA2CFull", "A2C", "RA2CFullOpt"]:
+    for mode in ["RA2CFullOpt"]:
         topo_string = f"{method}_n{node_n}_c{enecoeff}"
         print(f"Testing model for {mode}...")
         MAX_EPISODES = 10

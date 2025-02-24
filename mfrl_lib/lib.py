@@ -363,14 +363,14 @@ LEARNING_RATE = 1e-4
 N_OBSERVATIONS = 4
 N_ACTIONS = 2
 print_interval = 10
-ENERGY_COEFF = 0.9
+ENERGY_COEFF = 0.5
 ENTROPY_COEFF = 0.01
 CRITIC_COEFF = 0.5
 MAX_GRAD_NORM = 0.5
 EARLY_STOPPING_PATIENCE = 50
 
 # Make topology
-node_n = 20
+node_n = 10
 # "Model must be dumbbell, linear, random or fullmesh."
 method = "fullmesh"
 if method == "fullmesh":
