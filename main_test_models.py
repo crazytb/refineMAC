@@ -166,9 +166,9 @@ log_folder = "test_logs"
 os.makedirs(log_folder, exist_ok=True)
 # mode = "RA2C"
 enecoeff = ENERGY_COEFF
-for enecoeff in [0.1, 0.5, 0.9]:
-    # for mode in ["RA2C", "RA2CFull", "A2C", "RA2CFullOpt"]:
-    for mode in ["RA2CFullOpt"]:
+for enecoeff in [0.5]:
+    for mode in ["RA2C", "RA2CFull", "A2C"]:
+    # for mode in ["RA2CFullOpt"]:
         topo_string = f"{method}_n{node_n}_c{enecoeff}"
         print(f"Testing model for {mode}...")
         MAX_EPISODES = 10
